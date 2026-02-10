@@ -1,0 +1,13 @@
+#ignore all kind of files
+
+#except powershell  files
+!*.ps1
+
+#logs
+log.csv
+
+#config
+config/
+
+#scratch folder
+scratch/
