@@ -37,6 +37,26 @@ function Main {
   Write-Host "Ok"
 
 
+  Write-Host "Connecting to stmc student passwords landing page"
+  $response = $c.GetAsync("https://stmc.education.vic.gov.au/api/UserGet").Result
+
+  if (-not $response.IsSuccessStatusCode) {
+    Write-Host "Request Failed: stmc student passwords landing page"
+    Write-Host ($response.StatusCode)
+    Write-Host ([int]$response.StatusCode)
+  }
+
+  Write-Host "Ok"
+
+  $c.DefaultRequestHeaders.Add("emc-sch-id", ($config.SchooId))
+  Write-Host "Connecting to stmc student user attributes page for ($config.SchoolId)"
+  $response = $c.GetAsync("https://stmc.education.vic.gov.au/api/SchGetStuds?fullProps=true").Result
+
+  if (-not $response.IsSuccessStatusCode) {
+    Write-Host "Request Failed: stmc student user attributes page"
+    Write-Host ($response.StatusCode)
+    Write-Host ([int]$response.StatusCode)
+  }
 }
 
 
