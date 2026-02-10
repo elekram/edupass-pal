@@ -1,23 +1,14 @@
 $config = Get-Content -Raw -Path .\config\config.json | ConvertFrom-Json
+Import-Module CredentialManager
+
 
 function Main {
-  $username = $config.Credentials.user
-  $password = $config.Credentials.password
-
-  $pair = "$username`:$password"
-  $bytes = [System.Text.Encoding]::ASCII.GetBytes($pair)
-  $encoded = [Convert]::ToBase64String($bytes)
-  
-
   $cookieContainer = New-Object System.Net.CookieContainer
   $handler = New-Object System.Net.Http.HttpClientHandler
   $handler.CookieContainer = $cookieContainer
   $handler.UseCookies = $true
 
-  $handler.Credentials = New-Object System.Net.NetworkCredential(
-    $username,
-    $password
-  )
+  $handler.Credentials = New-AppCredential($config.UseCredentialManager)
 
   $c = New-Object System.Net.Http.HttpClient($handler)
   $c.DefaultRequestHeaders.Add("User-Agent", "PowerShell-HttpClient")
@@ -67,6 +58,37 @@ function Main {
   }
 
 }
+
+function New-AppCredential {
+  param (
+    [bool]$UseCredentialManager
+  )
+
+  if ($UseCredentialManager) {
+    $cred = Get-StoredCredential -Target "stmc.education.vic.gov.au"
+    $networkCredntial = New-Object System.Net.NetworkCredential(
+      $cred.UserName,
+      $cred.GetNetworkCredential().Password
+    )
+
+    return $networkCredntial
+  }
+
+  $username = $config.Credentials.user
+  $password = $config.Credentials.password
+
+  $pair = "$username`:$password"
+  $bytes = [System.Text.Encoding]::ASCII.GetBytes($pair)
+  $encoded = [Convert]::ToBase64String($bytes)
+
+  $networkCredntial = New-Object System.Net.NetworkCredential(
+    $username,
+    $password
+  )
+
+  return $networkCredntial
+}
+
 
 
 Main
