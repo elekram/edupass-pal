@@ -1,7 +1,5 @@
 $config = Get-Content -Raw -Path .\config\config.json | ConvertFrom-Json
 
-
-
 function Main {
   $username = $config.Credentials.user
   $password = $config.Credentials.password
@@ -24,7 +22,7 @@ function Main {
   $c = New-Object System.Net.Http.HttpClient($handler)
   $c.DefaultRequestHeaders.Add("User-Agent", "PowerShell-HttpClient")
 
-  Write-Host "Connecting to stmc.education.vic.gov.au..."
+  Write-Host "`n[ Connecting to stmc.education.vic.gov.au... ]"
   $response = $c.GetAsync("https://stmc.education.vic.gov.au/stud_pwd").Result
 
 
@@ -34,10 +32,10 @@ function Main {
     Write-Host ([int]$response.StatusCode)
   }
 
-  Write-Host "Ok"
+  Write-Host "[ Ok ]"
 
 
-  Write-Host "Connecting to stmc student passwords landing page"
+  Write-Host "`n[ Fetching the STMC student passwords landing page... ]"
   $response = $c.GetAsync("https://stmc.education.vic.gov.au/api/UserGet").Result
 
   if (-not $response.IsSuccessStatusCode) {
@@ -46,10 +44,10 @@ function Main {
     Write-Host ([int]$response.StatusCode)
   }
 
-  Write-Host "Ok"
+  Write-Host "[ Ok ]"
 
   $c.DefaultRequestHeaders.Add("emc-sch-id", ($config.SchooId))
-  Write-Host "Connecting to stmc student user attributes page for ($config.SchoolId)"
+  Write-Host "`n[ Fetching user data school id: $($config.SchooId)... ]"
   $response = $c.GetAsync("https://stmc.education.vic.gov.au/api/SchGetStuds?fullProps=true").Result
 
   if (-not $response.IsSuccessStatusCode) {
@@ -57,6 +55,17 @@ function Main {
     Write-Host ($response.StatusCode)
     Write-Host ([int]$response.StatusCode)
   }
+
+  Write-Host "[ Ok ]"
+
+  $responseBody = $response.Content.ReadAsStringAsync().Result
+
+  $users = $responseBody | ConvertFrom-Json
+  
+  foreach ($u in $users) {
+    Write-Output "DisplayName: $($u.disp), eduPassId: $($u.login), distinguishedName $($u.dn)"
+  }
+
 }
 
 
