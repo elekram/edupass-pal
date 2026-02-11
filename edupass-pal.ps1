@@ -1,8 +1,11 @@
-$config = Get-Content -Raw -Path .\config\config.json | ConvertFrom-Json
 Import-Module CredentialManager
-
+$config = Get-Content -Raw -Path .\config\config.json | ConvertFrom-Json
 
 function Main {
+
+  New-RandomPassword
+  exit
+
   $cookieContainer = New-Object System.Net.CookieContainer
   $handler = New-Object System.Net.Http.HttpClientHandler
   $handler.CookieContainer = $cookieContainer
@@ -57,6 +60,9 @@ function Main {
     Write-Output "DisplayName: $($u.disp), eduPassId: $($u.login), distinguishedName $($u.dn)"
   }
 
+
+  
+
 }
 
 function New-AppCredential {
@@ -65,7 +71,7 @@ function New-AppCredential {
   )
 
   if ($UseCredentialManager) {
-    $cred = Get-StoredCredential -Target "stmc.education.vic.gov.au"
+    $cred = Get-StoredCredential -Target $config.SiteUrl
     $networkCredntial = New-Object System.Net.NetworkCredential(
       $cred.UserName,
       $cred.GetNetworkCredential().Password
@@ -89,6 +95,27 @@ function New-AppCredential {
   return $networkCredntial
 }
 
+function New-RandomPassword {
+  $randNumbers1 = Get-Random -Minimum 100 -Maximum 999
+  $randNumbers2 = Get-Random -Minimum 100 -Maximum 999
 
+  $randLetters1 = Get-RandomLetters
+  $randLetters2 = Get-randomLetters
+  $randUpperCaseLetter = $randLetters2.ToUpper()
+
+  $characters = @("!", "@", "#", "$","%", "^")
+  $randCharacter = Get-Random -InputObject $characters
+
+  $pword = "$randLetters1$randNumbers1$randUpperCaseLetter$randNumbers2$randCharacter"
+  
+  return $pword
+}
+
+function Get-RandomLetters() {
+  $randomLetters = $( -join ((65..90) + (97..122) | 
+    Get-Random -Count 3 | 
+    ForEach-Object { [char]$_ })).ToString().ToLower()
+  return $randomLetters
+}
 
 Main
