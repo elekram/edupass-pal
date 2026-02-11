@@ -3,8 +3,9 @@ $config = Get-Content -Raw -Path .\config\config.json | ConvertFrom-Json
 
 function Main {
 
-  New-RandomPassword
-  exit
+  # $DC = $config.DomainController
+
+
 
   $cookieContainer = New-Object System.Net.CookieContainer
   $handler = New-Object System.Net.Http.HttpClientHandler
@@ -55,14 +56,59 @@ function Main {
   $responseBody = $response.Content.ReadAsStringAsync().Result
 
   $users = $responseBody | ConvertFrom-Json
+  $studentPasswords = Get-StudentDbPasswords
   
   foreach ($u in $users) {
-    Write-Output "DisplayName: $($u.disp), eduPassId: $($u.login), distinguishedName $($u.dn)"
+    $eduPassId = $u.login
+    $distringuisedName = $u.dn
+    
+    if($studentPasswords.ContainsKey($eduPassId)) {
+      $payload1 = @{
+        dn     = $distringuisedName
+        newPwd = New-RandomPassword
+      } | ConvertTo-Json -Depth 3
+
+      $payload2 = @{
+        dn     = $distringuisedName
+        newPwd = $studentPasswords[$eduPassId].Password
+      } | ConvertTo-Json -Depth 3
+
+
+      Write-Host $payload1
+      Write-Host $payload2
+
+      Write-Output "DisplayName: $($u.disp), eduPassId: $($u.login), distinguishedName $($u.dn), password $($studentPasswords[$u.login].Password)" 
+
+
+      $requestBody = New-Object System.Net.Http.StringContent(
+          $payload1,
+          [System.Text.Encoding]::UTF8,
+          "application/json"
+      )
+
+      $response = $c.PostAsync(
+        "https://stmc.education.vic.gov.au/api/StudResetPwd",
+        $requestBody
+      ).Result
+
+      Write-Host $response
+
+      $requestBody = New-Object System.Net.Http.StringContent(
+        $payload2,
+        [System.Text.Encoding]::UTF8,
+        "application/json"
+      )
+
+      $response = $c.PostAsync(
+        "https://stmc.education.vic.gov.au/api/StudResetPwd",
+        $requestBody
+      ).Result
+
+      Write-Host $response
+
+    }
+    return
   }
-
-
-  
-
 }
 
 function New-AppCredential {
@@ -116,6 +162,45 @@ function Get-RandomLetters() {
     Get-Random -Count 3 | 
     ForEach-Object { [char]$_ })).ToString().ToLower()
   return $randomLetters
+}
+
+function Get-StudentDbPasswords() {
+  $ConnectionString = $config.SQL.Server + $config.SQL.Catalog + $config.SQL.UserId + $config.SQL.Password 
+  $TableName = $config.SQL.TableName
+
+  $connection = New-Object System.Data.SqlClient.SQLConnection($ConnectionString)
+
+  $lookupQuery = "
+  SELECT [StudentCode], [Password], [eduPassId] 
+    FROM $TableName"
+
+
+  $connection.Open()
+  $command = New-Object System.Data.SqlClient.SqlCommand($lookupQuery, $connection);
+
+  $adapter = New-Object System.Data.SqlClient.SqlDataAdapter $command
+  $dataTable = New-Object System.Data.DataTable
+  $adapter.Fill($dataTable) | Out-Null
+
+  $connection.Close()
+
+  $dict = New-Object 'System.Collections.Generic.Dictionary[string,object]'
+
+  foreach ($row in $dataTable.Rows) {
+    
+    $eduPassId = $row['eduPassId']
+
+    if(-not [string]::IsNullOrWhiteSpace($eduPassId)) {
+      $student = [PSCustomObject]@{
+        StudentCode = $row['StudentCode'].ToString()
+        Password = $row['Password'].ToString()
+      }  
+
+      $dict.Add($eduPassId, $student)
+    }
+  }
+
+  return $dict
 }
 
 Main
