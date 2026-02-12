@@ -2,39 +2,35 @@ Import-Module CredentialManager
 $config = Get-Content -Raw -Path .\config\config.json | ConvertFrom-Json
 
 function Main {
+  $connectionString = $config.SQL.Server + $config.SQL.Catalog + $config.SQL.UserId + $config.SQL.Password 
+  $tableName = $config.SQL.TableName
+
   $client = New-AppHttpClient
   $client = LoginToStmc -BaseUrl 'https://stmc.education.vic.gov.au/stud_pwd' -Client $client
 
-  $students = Get-StudentsFromStmc($client)
-
-  $connectionString = $config.SQL.Server + $config.SQL.Catalog + $config.SQL.UserId + $config.SQL.Password 
-  $tableName = $config.SQL.TableName
   $studentPasswords = Get-StudentDbPasswords -ConnectionString $connectionString -TableName $tableName
-  
+  $students = Get-StudentsFromStmc -Client $client
+
   foreach ($s in $students) {
     $eduPassId = $s.login
-    $distringuisedName = $s.dn
+    $distinguishedName = $s.dn
 
-    if ($studentPasswords.ContainsKey($eduPassId)) {
-      if ($studentPasswords[$eduPassId].RemotePasswordSet) {
-        Write-Host 'IS SET'
-      }
-      else {
-        Write-Host 'NULL AND NOT SET'
-      }
+    # $sqlResponse = Set-StudentPasswordUpdated -ConnectionString $connectionString -TableName $tableName -EdupassId $eduPassId -RemotePasswordSet $false
+
+    Write-Host 'SQL Resp'
+    Write-Host $sqlResponse
+
+    if (-not $studentPasswords.ContainsKey($eduPassId)) {
+      return
     }
 
+    if ($studentPasswords[$eduPassId].RemotePasswordSet) {
+      return
+    }
     
-    if ($studentPasswords.ContainsKey($eduPassId)) {
-      $payloadWithRandomPassword = @{
-        dn     = $distringuisedName
-        newPwd = New-RandomPassword
-      } | ConvertTo-Json -Depth 3
-
-      $payloadWithRecordedPassword = @{
-        dn     = $distringuisedName
-        newPwd = $studentPasswords[$eduPassId].Password
-      } | ConvertTo-Json -Depth 3
+    if ($studentPasswords.ContainsKey($eduPassId) -and 
+      -not $studentPasswords[$eduPassId].RemotePasswordSet
+    ) {
 
 
       Write-Host $payloadWithRandomPassword
@@ -77,6 +73,34 @@ function Main {
   }
 }
 
+function Set-EdupassIdPassword {
+  [string]$DistinguishedName,
+  [string]$NewPassword,
+  [System.Net.Http.HttpClient]$Client
+
+
+  $payload = @{
+    dn     = $DistinguishedName
+    newPwd = NewPassword
+  } | ConvertTo-Json -Depth 3
+
+  Write-Host $payload
+
+  $requestBody = New-Object System.Net.Http.StringContent(
+    $payload,
+    [System.Text.Encoding]::UTF8,
+    'application/json'
+  )
+
+  $response = $client.PostAsync(
+    'https://stmc.education.vic.gov.au/api/StudResetPwd',
+    $requestBody
+  ).Result
+
+  return $response
+
+}
+
 function  New-AppHttpClient {
   $cookieContainer = New-Object System.Net.CookieContainer
   $handler = New-Object System.Net.Http.HttpClientHandler
@@ -91,10 +115,13 @@ function  New-AppHttpClient {
   return $c
 }
 
-function Get-StudentsFromStmc($client) {
-  Write-Host "`n[ Fetching the STMC student passwords landing page... ]"
+function Get-StudentsFromStmc {
+  param(
+    [System.Net.Http.HttpClient]$Client
+  )
 
-  $response = $client.GetAsync('https://stmc.education.vic.gov.au/api/UserGet').Result
+  Write-Host "`n[ Fetching the STMC student passwords landing page... ]"
+  $response = $Client.GetAsync('https://stmc.education.vic.gov.au/api/UserGet').Result
 
   if (-not $response.IsSuccessStatusCode) {
     Write-Host 'Request Failed: stmc student passwords landing page'
@@ -108,7 +135,7 @@ function Get-StudentsFromStmc($client) {
   Write-Host "`n[ Fetching student data for school id: $($config.SchooId)... ]"
 
   $client.DefaultRequestHeaders.Add('emc-sch-id', ($config.SchooId))
-  $response = $client.GetAsync('https://stmc.education.vic.gov.au/api/SchGetStuds?fullProps=true').Result
+  $response = $Client.GetAsync('https://stmc.education.vic.gov.au/api/SchGetStuds?fullProps=true').Result
 
   if (-not $response.IsSuccessStatusCode) {
     Write-Host 'Request Failed: stmc student user attributes page'
@@ -203,7 +230,7 @@ function New-RandomPassword {
   return $pword
 }
 
-function Get-RandomLetters() {
+function Get-RandomLetters {
   $randomLetters = $( -join ((65..90) + (97..122) | 
       Get-Random -Count 3 | 
       ForEach-Object { [char]$_ })).ToString().ToLower()
@@ -241,7 +268,7 @@ function Get-StudentDbPasswords {
       $student = [PSCustomObject]@{
         StudentCode       = $row['StudentCode'].ToString()
         Password          = $row['Password'].ToString()
-        RemotePasswordSet = [bool]$row['remotePasswordSet']
+        RemotePasswordSet = [bool]$row['RemotePasswordSet']
       }  
 
       $dict.Add($eduPassId, $student)
@@ -255,8 +282,11 @@ function Set-StudentPasswordUpdated {
   param(
     [string]$ConnectionString,
     [string]$TableName,
-    [string]$EdupassId
+    [string]$EdupassId,
+    [bool]$RemotePasswordSet
   )
+
+  $remoteSet = [int]$RemotePasswordSet
 
   $connection = New-Object System.Data.SqlClient.SQLConnection($ConnectionString)
 
@@ -265,9 +295,8 @@ function Set-StudentPasswordUpdated {
   $command.Connection = $connection
   
   $cmd = "UPDATE $TableName
-    SET [RemotePasswordSet] = $true
+    SET [RemotePasswordSet] = $remoteSet
     WHERE [eduPassId] = '$EdupassId'"
-  
 
   $command.CommandText = $cmd
   $sqlResponse = $command.ExecuteNonQuery()
