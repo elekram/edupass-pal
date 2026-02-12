@@ -12,76 +12,75 @@ function Main {
   $students = Get-StudentsFromStmc -Client $client
 
   foreach ($s in $students) {
+
     $eduPassId = $s.login
+    $schoolPassword = $studentPasswords[$eduPassId].Password
+    $tempPassword = New-RandomPassword
     $distinguishedName = $s.dn
-
-    # $sqlResponse = Set-StudentPasswordUpdated -ConnectionString $connectionString -TableName $tableName -EdupassId $eduPassId -RemotePasswordSet $false
-
-    Write-Host 'SQL Resp'
-    Write-Host $sqlResponse
+    $studentDisplayName = $s.disp
 
     if (-not $studentPasswords.ContainsKey($eduPassId)) {
-      return
+      continue
     }
 
     if ($studentPasswords[$eduPassId].RemotePasswordSet) {
-      return
+      continue
     }
-    
-    if ($studentPasswords.ContainsKey($eduPassId) -and 
-      -not $studentPasswords[$eduPassId].RemotePasswordSet
+
+    Write-Host "`n-=-=-=-=-=-=-=-=-=-=-=-=-=-"
+    Write-Host "`nProcessing student: $studentDisplayName`neduPassId: $eduPassId`nDistinguishedName $distinguishedName,`nPassword $schoolPassword`n" 
+
+    $response = $null
+    while (
+      -not $response -or 
+      -not $response.IsSuccessStatusCode
     ) {
+      if ($null -ne $response) {
+        Write-Host 'Retrying...'
+      }
 
+      Write-Host "Setting temporary password $tempPassword"
+      $response = Set-EdupassIdPassword -DistinguishedName $distinguishedName -Secret $tempPassword -Client $client
+      Write-Host "$([int]$response.StatusCode): $($response.StatusCode)"
 
-      Write-Host $payloadWithRandomPassword
-      Write-Host $payloadWithRecordedPassword
-
-      Write-Output "DisplayName: $($s.disp), eduPassId: $($s.login), distinguishedName $($s.dn), password $($studentPasswords[$s.login].Password)" 
-
-
-      $requestBody = New-Object System.Net.Http.StringContent(
-        $payloadWithRandomPassword,
-        [System.Text.Encoding]::UTF8,
-        'application/json'
-      )
-
-      $response = $client.PostAsync(
-        'https://stmc.education.vic.gov.au/api/StudResetPwd',
-        $requestBody
-      ).Result
-
-      Write-Host $response
-
-      Start-Sleep -Seconds 5
-
-
-      $requestBody = New-Object System.Net.Http.StringContent(
-        $payloadWithRecordedPassword,
-        [System.Text.Encoding]::UTF8,
-        'application/json'
-      )
-
-      $response = $client.PostAsync(
-        'https://stmc.education.vic.gov.au/api/StudResetPwd',
-        $requestBody
-      ).Result
-
-      Write-Host $response
-
+      Start-Sleep -Seconds 3
     }
-    return
+
+    $response = $null
+    while (
+      -not $response -or 
+      -not $response.IsSuccessStatusCode
+    ) {
+      if ($null -ne $response) {
+        Write-Host "`nRetrying..."
+      }
+
+      Write-Host "`nSetting school password $schoolPassword"
+      $response = Set-EdupassIdPassword -DistinguishedName $distinguishedName -Secret $schoolPassword -Client $client
+      Write-Host "$([int]$response.StatusCode): $($response.StatusCode)"
+
+      Start-Sleep -Seconds 3
+    }
+    $sqlResponse = Set-IsRemoteStudentPasswordUpdated -ConnectionString $connectionString -TableName $tableName -EdupassId $eduPassId -RemotePasswordSet $true
+    
+    if ($sqlResponse) {
+      Write-Host 'Password DB Flag Set Successfully'
+    }
   }
 }
 
 function Set-EdupassIdPassword {
-  [string]$DistinguishedName,
-  [string]$NewPassword,
-  [System.Net.Http.HttpClient]$Client
-
+  param(
+    [string]$DistinguishedName,
+    [Parameter(Mandatory = $true)]
+    [ValidateNotNullOrEmpty()]
+    [string]$Secret,
+    [System.Net.Http.HttpClient]$Client
+  )
 
   $payload = @{
     dn     = $DistinguishedName
-    newPwd = NewPassword
+    newPwd = $Secret
   } | ConvertTo-Json -Depth 3
 
   Write-Host $payload
@@ -92,13 +91,12 @@ function Set-EdupassIdPassword {
     'application/json'
   )
 
-  $response = $client.PostAsync(
+  $response = $Client.PostAsync(
     'https://stmc.education.vic.gov.au/api/StudResetPwd',
     $requestBody
   ).Result
 
   return $response
-
 }
 
 function  New-AppHttpClient {
@@ -278,7 +276,7 @@ function Get-StudentDbPasswords {
   return $dict
 }
 
-function Set-StudentPasswordUpdated {
+function Set-IsRemoteStudentPasswordUpdated {
   param(
     [string]$ConnectionString,
     [string]$TableName,
