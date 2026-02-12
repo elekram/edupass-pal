@@ -251,4 +251,29 @@ function Get-StudentDbPasswords {
   return $dict
 }
 
+function Set-StudentPasswordUpdated {
+  param(
+    [string]$ConnectionString,
+    [string]$TableName,
+    [string]$EdupassId
+  )
+
+  $connection = New-Object System.Data.SqlClient.SQLConnection($ConnectionString)
+
+  $connection.Open()
+  $command = New-Object System.Data.SQLClient.SQLCommand
+  $command.Connection = $connection
+  
+  $cmd = "UPDATE $TableName
+    SET [RemotePasswordSet] = $true
+    WHERE [eduPassId] = '$EdupassId'"
+  
+
+  $command.CommandText = $cmd
+  $sqlResponse = $command.ExecuteNonQuery()
+  $connection.Close()
+
+  return $sqlResponse
+}
+
 Main
