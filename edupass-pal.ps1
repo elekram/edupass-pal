@@ -2,33 +2,34 @@ Import-Module CredentialManager
 $config = Get-Content -Raw -Path .\config\config.json | ConvertFrom-Json
 
 function Main {
+
   $connectionString = $config.SQL.Server + $config.SQL.Catalog + $config.SQL.UserId + $config.SQL.Password 
   $tableName = $config.SQL.TableName
 
   $client = New-AppHttpClient
-  $client = LoginToStmc -BaseUrl 'https://stmc.education.vic.gov.au/stud_pwd' -Client $client
+  Open-StmcConnection -BaseUrl 'https://stmc.education.vic.gov.au/stud_pwd' -Client $client
 
   $studentPasswords = Get-StudentDbPasswords -ConnectionString $connectionString -TableName $tableName
   $students = Get-StudentsFromStmc -Client $client
 
   foreach ($s in $students) {
-
     $eduPassId = $s.login
-    $schoolPassword = $studentPasswords[$eduPassId].Password
-    $tempPassword = New-RandomPassword
-    $distinguishedName = $s.dn
-    $studentDisplayName = $s.disp
 
     if (-not $studentPasswords.ContainsKey($eduPassId)) {
       continue
     }
 
-    if ($studentPasswords[$eduPassId].RemotePasswordSet) {
+    if ($studentPasswords[$eduPassId].EdupassPasswordStatus -ne 0) {
       continue
     }
 
-    Write-Host "`n-=-=-=-=-=-=-=-=-=-=-=-=-=-"
-    Write-Host "`nProcessing student: $studentDisplayName`neduPassId: $eduPassId`nDistinguishedName $distinguishedName,`nPassword $schoolPassword`n" 
+    $distinguishedName = $s.dn
+    $studentDisplayName = $s.disp
+
+    $tempPassword = New-RandomPassword
+
+    Write-Host "`n-------"
+    Write-Host "Processing student: $studentDisplayName`neduPassId: $eduPassId`nDistinguishedName $distinguishedName`n"
 
     $response = $null
     while (
@@ -39,13 +40,40 @@ function Main {
         Write-Host 'Retrying...'
       }
 
-      Write-Host "Setting temporary password $tempPassword"
+      Write-Host "SETTING TEMP PASSWORD: $tempPassword"
       $response = Set-EdupassIdPassword -DistinguishedName $distinguishedName -Secret $tempPassword -Client $client
       Write-Host "$([int]$response.StatusCode): $($response.StatusCode)"
 
-      Start-Sleep -Seconds 3
+      Start-Sleep -Seconds 1
     }
 
+    $sqlResponse = Set-EdupassPasswordStatus -ConnectionString $connectionString -TableName $tableName -EdupassId $eduPassId -EdupassPasswordStatus 1
+    if ($sqlResponse) {
+      Write-Host 'Password DB Flag Sucessfully set to 1'
+    }
+  }
+
+  foreach ($s in $students) {
+    $eduPassId = $s.login
+
+    if (-not $studentPasswords.ContainsKey($eduPassId)) {
+      continue
+    }
+
+    if (
+      $studentPasswords[$eduPassId].EdupassPasswordStatus -eq 0 -or
+      $studentPasswords[$eduPassId].EdupassPasswordStatus -eq 2) {
+      continue
+    }
+
+    $schoolPassword = $studentPasswords[$eduPassId].Password
+    $distinguishedName = $s.dn
+    $studentDisplayName = $s.disp
+
+
+    Write-Host "`n-------"
+    Write-Host "Processing student: $studentDisplayName`neduPassId: $eduPassId`nDistinguishedName $distinguishedName`n" 
+  
     $response = $null
     while (
       -not $response -or 
@@ -55,16 +83,16 @@ function Main {
         Write-Host "`nRetrying..."
       }
 
-      Write-Host "`nSetting school password $schoolPassword"
+      Write-Host "`nSETTING SCHOOL PASSWORD: $schoolPassword"
       $response = Set-EdupassIdPassword -DistinguishedName $distinguishedName -Secret $schoolPassword -Client $client
       Write-Host "$([int]$response.StatusCode): $($response.StatusCode)"
 
-      Start-Sleep -Seconds 3
+      Start-Sleep -Seconds 1
     }
-    $sqlResponse = Set-IsRemoteStudentPasswordUpdated -ConnectionString $connectionString -TableName $tableName -EdupassId $eduPassId -RemotePasswordSet $true
     
+    $sqlResponse = Set-EdupassPasswordStatus -ConnectionString $connectionString -TableName $tableName -EdupassId $eduPassId -EdupassPasswordStatus 2
     if ($sqlResponse) {
-      Write-Host 'Password DB Flag Set Successfully'
+      Write-Host 'Password DB Flag Sucessfully set to 2'
     }
   }
 }
@@ -132,7 +160,7 @@ function Get-StudentsFromStmc {
   Write-Host '[ Fetched Ok ]'
   Write-Host "`n[ Fetching student data for school id: $($config.SchooId)... ]"
 
-  $client.DefaultRequestHeaders.Add('emc-sch-id', ($config.SchooId))
+  $Client.DefaultRequestHeaders.Add('emc-sch-id', ($config.SchooId))
   $response = $Client.GetAsync('https://stmc.education.vic.gov.au/api/SchGetStuds?fullProps=true').Result
 
   if (-not $response.IsSuccessStatusCode) {
@@ -177,14 +205,15 @@ function New-AppCredential {
   return $networkCredntial
 }
 
-function LoginToStmc {
+function Open-StmcConnection {
   param(
     [string]$BaseUrl,
     [System.Net.Http.HttpClient]$Client
   )
+
   Write-Host "`n[ Connecting to stmc.education.vic.gov.au... ]"
 
-  $response = $client.GetAsync($BaseUrl).Result
+  $response = $Client.GetAsync($BaseUrl).Result
   $requestRetries = 0
 
   while (
@@ -209,7 +238,6 @@ function LoginToStmc {
   }
 
   Write-Host '[ Connected Ok ]'
-  return $client
 }
 
 function New-RandomPassword {
@@ -244,7 +272,7 @@ function Get-StudentDbPasswords {
   $connection = New-Object System.Data.SqlClient.SQLConnection($ConnectionString)
 
   $lookupQuery = "
-  SELECT [StudentCode], [Password], [eduPassId], [remotePasswordSet] 
+  SELECT [StudentCode], [Password], [eduPassId], [EdupassPasswordStatus]
     FROM $TableName"
 
   $connection.Open()
@@ -264,9 +292,9 @@ function Get-StudentDbPasswords {
 
     if (-not [string]::IsNullOrWhiteSpace($eduPassId)) {
       $student = [PSCustomObject]@{
-        StudentCode       = $row['StudentCode'].ToString()
-        Password          = $row['Password'].ToString()
-        RemotePasswordSet = [bool]$row['RemotePasswordSet']
+        StudentCode           = $row['StudentCode'].ToString()
+        Password              = $row['Password'].ToString()
+        EdupassPasswordStatus = [int]$row['EdupassPasswordStatus']
       }  
 
       $dict.Add($eduPassId, $student)
@@ -276,15 +304,13 @@ function Get-StudentDbPasswords {
   return $dict
 }
 
-function Set-IsRemoteStudentPasswordUpdated {
+function Set-EdupassPasswordStatus {
   param(
     [string]$ConnectionString,
     [string]$TableName,
     [string]$EdupassId,
-    [bool]$RemotePasswordSet
+    [int]$EdupassPasswordStatus
   )
-
-  $remoteSet = [int]$RemotePasswordSet
 
   $connection = New-Object System.Data.SqlClient.SQLConnection($ConnectionString)
 
@@ -293,7 +319,7 @@ function Set-IsRemoteStudentPasswordUpdated {
   $command.Connection = $connection
   
   $cmd = "UPDATE $TableName
-    SET [RemotePasswordSet] = $remoteSet
+    SET [EdupassPasswordStatus] = $EdupassPasswordStatus
     WHERE [eduPassId] = '$EdupassId'"
 
   $command.CommandText = $cmd
