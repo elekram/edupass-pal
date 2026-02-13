@@ -1,2 +1,1 @@
 # edupass-pal
-# edupass-pal

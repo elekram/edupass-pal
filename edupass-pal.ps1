@@ -71,13 +71,15 @@ function Main {
     $studentDisplayName = $s.disp
 
 
-    Write-Host "`n-------"
+    Write-Host '-------'
     Write-Host "Processing student: $studentDisplayName`neduPassId: $eduPassId`nDistinguishedName $distinguishedName`n" 
   
+    $requestRetries = 0
     $response = $null
     while (
       -not $response -or 
-      -not $response.IsSuccessStatusCode
+      -not $response.IsSuccessStatusCode -and
+      $requestRetries -lt 10
     ) {
       if ($null -ne $response) {
         Write-Host "`nRetrying..."
@@ -88,6 +90,7 @@ function Main {
       Write-Host "$([int]$response.StatusCode): $($response.StatusCode)"
 
       Start-Sleep -Seconds 1
+      $requestRetries++
     }
     
     $sqlResponse = Set-EdupassPasswordStatus -ConnectionString $connectionString -TableName $tableName -EdupassId $eduPassId -EdupassPasswordStatus 2
@@ -95,6 +98,7 @@ function Main {
       Write-Host 'Password DB Flag Sucessfully set to 2'
     }
   }
+  Write-Host "`n[ FINISHED - ALL PASSWORDS HAVE BEEN RESET ]"
 }
 
 function Set-EdupassIdPassword {
