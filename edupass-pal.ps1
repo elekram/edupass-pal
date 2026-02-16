@@ -12,8 +12,9 @@ function Main {
   $studentPasswords = Get-StudentDbPasswords -ConnectionString $connectionString -TableName $tableName
   $students = Get-StudentsFromStmc -Client $client
 
-  foreach ($s in $students) {
-    $eduPassId = $s.login
+  foreach ($s in $students.GetEnumerator()) {
+
+    $eduPassId = $s.Value.EduPassId
 
     if (-not $studentPasswords.ContainsKey($eduPassId)) {
       continue
@@ -23,8 +24,8 @@ function Main {
       continue
     }
 
-    $distinguishedName = $s.dn
-    $studentDisplayName = $s.disp
+    $distinguishedName = $s.Value.DistinguishedName
+    $studentDisplayName = $s.Value.DisplayName
 
     $tempPassword = New-RandomPassword
 
@@ -53,8 +54,8 @@ function Main {
     }
   }
 
-  foreach ($s in $students) {
-    $eduPassId = $s.login
+  foreach ($s in $students.GetEnumerator()) {
+    $eduPassId = $s.Value.EduPassId
 
     if (-not $studentPasswords.ContainsKey($eduPassId)) {
       continue
@@ -67,8 +68,9 @@ function Main {
     }
 
     $schoolPassword = $studentPasswords[$eduPassId].Password
-    $distinguishedName = $s.dn
-    $studentDisplayName = $s.disp
+    
+    $distinguishedName = $s.Value.DistinguishedName
+    $studentDisplayName = $s.Value.DisplayName
 
 
     Write-Host '-------'
@@ -178,8 +180,32 @@ function Get-StudentsFromStmc {
   Write-Host '[ Fetched Ok ]'
 
   $responseBody = $response.Content.ReadAsStringAsync().Result
+  $departmentRecords = $responseBody | ConvertFrom-Json
 
-  $students = $responseBody | ConvertFrom-Json
+  $students = New-Object 'System.Collections.Generic.Dictionary[string,object]'
+
+  foreach ($r in $departmentRecords) {
+    $eduPassId = $r.login
+    $displayName = $r.disp
+    $distinguishedName = $r.dn
+
+    if ([string]::IsNullOrWhiteSpace($eduPassId)) {
+      continue
+    }
+ 
+    if ([string]::IsNullOrWhiteSpace($distinguishedName)) {
+      continue
+    }
+
+    $student = [PSCustomObject]@{
+      EduPassId         = $eduPassId.ToUpper()
+      DisplayName       = $displayName
+      DistinguishedName = $distinguishedName
+    }  
+
+    $students.Add($eduPassId.ToUpper(), $student)
+  }
+
   return $students
 }
 
@@ -333,4 +359,5 @@ function Set-EdupassPasswordStatus {
   return $sqlResponse
 }
 
+Main
 Main
