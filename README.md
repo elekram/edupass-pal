@@ -5,13 +5,7 @@
 {
   "SiteUrl": "stmc.education.vic.gov.au",
   "SchooId": "0000",
-  "SQL": {
-    "Server": "server=svr;",
-    "TableName": "[dbo].[SomeTable]",
-    "Catalog": "initial catalog=somecatalog;",
-    "UserId": "uid=someuser;",
-    "Password": "pwd=secret;"
-  },
+  "PasswordCsvFile": "sample_stud_pwd_reset.csv",
   "UseCredentialManager": true,
   "Credentials": {
     "user": "mark.lee@education.vic.gov.au",

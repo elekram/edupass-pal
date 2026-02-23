@@ -2,25 +2,16 @@ Import-Module CredentialManager
 $config = Get-Content -Raw -Path .\config\config.json | ConvertFrom-Json
 
 function Main {
-
-  $connectionString = $config.SQL.Server + $config.SQL.Catalog + $config.SQL.UserId + $config.SQL.Password 
-  $tableName = $config.SQL.TableName
-
   $client = New-AppHttpClient
   Open-StmcConnection -BaseUrl 'https://stmc.education.vic.gov.au/stud_pwd' -Client $client
 
-  $studentPasswords = Get-StudentDbPasswords -ConnectionString $connectionString -TableName $tableName
+  $studentPasswords = Get-PasswordsCsv
   $students = Get-StudentsFromStmc -Client $client
 
   foreach ($s in $students.GetEnumerator()) {
-
     $eduPassId = $s.Value.EduPassId
 
     if (-not $studentPasswords.ContainsKey($eduPassId)) {
-      continue
-    }
-
-    if ($studentPasswords[$eduPassId].EdupassPasswordStatus -ne 0) {
       continue
     }
 
@@ -47,23 +38,12 @@ function Main {
 
       Start-Sleep -Seconds 1
     }
-
-    $sqlResponse = Set-EdupassPasswordStatus -ConnectionString $connectionString -TableName $tableName -EdupassId $eduPassId -EdupassPasswordStatus 1
-    if ($sqlResponse) {
-      Write-Host 'Password DB Flag Sucessfully set to 1'
-    }
   }
 
   foreach ($s in $students.GetEnumerator()) {
     $eduPassId = $s.Value.EduPassId
 
     if (-not $studentPasswords.ContainsKey($eduPassId)) {
-      continue
-    }
-
-    if (
-      $studentPasswords[$eduPassId].EdupassPasswordStatus -eq 0 -or
-      $studentPasswords[$eduPassId].EdupassPasswordStatus -eq 2) {
       continue
     }
 
@@ -93,11 +73,6 @@ function Main {
 
       Start-Sleep -Seconds 1
       $requestRetries++
-    }
-    
-    $sqlResponse = Set-EdupassPasswordStatus -ConnectionString $connectionString -TableName $tableName -EdupassId $eduPassId -EdupassPasswordStatus 2
-    if ($sqlResponse) {
-      Write-Host 'Password DB Flag Sucessfully set to 2'
     }
   }
   Write-Host "`n[ FINISHED - ALL PASSWORDS HAVE BEEN RESET ]"
@@ -293,38 +268,23 @@ function Get-RandomLetters {
   return $randomLetters
 }
 
-function Get-StudentDbPasswords {
-  param(
-    [string]$ConnectionString,
-    [string]$TableName
-  )
-
-  $connection = New-Object System.Data.SqlClient.SQLConnection($ConnectionString)
-
-  $lookupQuery = "
-  SELECT [StudentCode], [Password], [eduPassId], [EdupassPasswordStatus]
-    FROM $TableName"
-
-  $connection.Open()
-  $command = New-Object System.Data.SqlClient.SqlCommand($lookupQuery, $connection);
-
-  $adapter = New-Object System.Data.SqlClient.SqlDataAdapter $command
-  $dataTable = New-Object System.Data.DataTable
-  $adapter.Fill($dataTable) | Out-Null
-
-  $connection.Close()
+function Get-PasswordsCsv {
+  $csvFileName = $config.PasswordCsvFile
+  $passwordsCSV = Import-Csv -Path  ".\csv\$csvFileName"
 
   $dict = New-Object 'System.Collections.Generic.Dictionary[string,object]'
 
-  foreach ($row in $dataTable.Rows) {
-    
-    $eduPassId = $row['eduPassId']
+  foreach ($row in $passwordsCSV) {
+    $eduPassId = $row.login
+    $password = $row.password
+
+    if (!$password) { 
+      continue
+    }
 
     if (-not [string]::IsNullOrWhiteSpace($eduPassId)) {
       $student = [PSCustomObject]@{
-        StudentCode           = $row['StudentCode'].ToString()
-        Password              = $row['Password'].ToString()
-        EdupassPasswordStatus = [int]$row['EdupassPasswordStatus']
+        Password = $password
       }  
 
       $dict.Add($eduPassId, $student)
@@ -332,31 +292,7 @@ function Get-StudentDbPasswords {
   }
 
   return $dict
-}
 
-function Set-EdupassPasswordStatus {
-  param(
-    [string]$ConnectionString,
-    [string]$TableName,
-    [string]$EdupassId,
-    [int]$EdupassPasswordStatus
-  )
-
-  $connection = New-Object System.Data.SqlClient.SQLConnection($ConnectionString)
-
-  $connection.Open()
-  $command = New-Object System.Data.SQLClient.SQLCommand
-  $command.Connection = $connection
-  
-  $cmd = "UPDATE $TableName
-    SET [EdupassPasswordStatus] = $EdupassPasswordStatus
-    WHERE [eduPassId] = '$EdupassId'"
-
-  $command.CommandText = $cmd
-  $sqlResponse = $command.ExecuteNonQuery()
-  $connection.Close()
-
-  return $sqlResponse
 }
 
 Main

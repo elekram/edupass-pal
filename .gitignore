@@ -9,5 +9,8 @@ log.csv
 #config
 config/
 
+#csv files
+csv/
+
 #scratch folder
 scratch/
