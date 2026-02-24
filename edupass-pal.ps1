@@ -1,5 +1,21 @@
 Import-Module CredentialManager
+
+if (-not (Test-Path -Path '.\config\config.json' -PathType Leaf)) {
+  Write-Host `n`n'Error: config.json file missing.'
+  Write-Host "Create file './config/config.json'"
+  Write-Host 'README: https://github.com/elekram/edupass-pal'`n
+  Write-Host 'Script must exit'
+  exit
+}
+
 $config = Get-Content -Raw -Path .\config\config.json | ConvertFrom-Json
+$csvFile = $config.PasswordCsvFile
+if (-not (Test-Path -Path ".\csv\$csvFile" -PathType Leaf)) {
+  Write-Host `n`n'Error: student passwords CSV file missing'
+  Write-Host "File name in config is '$csvFile' make sure './csv/$csvFile' exists"
+  Write-Host 'Script must exit'`n`n
+  exit
+}
 
 function Main {
   $client = New-AppHttpClient
@@ -157,7 +173,7 @@ function Get-StudentsFromStmc {
   $responseBody = $response.Content.ReadAsStringAsync().Result
   $departmentRecords = $responseBody | ConvertFrom-Json
 
-  $students = New-Object 'System.Collections.Generic.Dictionary[string,object]'
+  $students = New-Object 'System.Collections.Generic.Dictionary[string, object]'
 
   foreach ($r in $departmentRecords) {
     $eduPassId = $r.login
@@ -272,7 +288,7 @@ function Get-PasswordsCsv {
   $csvFileName = $config.PasswordCsvFile
   $passwordsCSV = Import-Csv -Path  ".\csv\$csvFileName"
 
-  $dict = New-Object 'System.Collections.Generic.Dictionary[string,object]'
+  $dict = New-Object 'System.Collections.Generic.Dictionary[string, object]'
 
   foreach ($row in $passwordsCSV) {
     $eduPassId = $row.login
